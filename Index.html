@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>서울시 실시간 버스 도착 정보</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #f4f6f8;
+      color: #333;
+      display: flex;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 480px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      padding: 24px;
+    }
+
+    header {
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    header h1 {
+      font-size: 1.4rem;
+      color: #1a1a1a;
+      margin-bottom: 6px;
+    }
+
+    header p {
+      font-size: 0.85rem;
+      color: #666;
+    }
+
+    .search-box {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    .search-box input {
+      flex: 1;
+      padding: 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 1rem;
+      outline: none;
+    }
+
+    .search-box input:focus {
+      border-color: #007aff;
+    }
+
+    .search-box button {
+      padding: 12px 20px;
+      background-color: #007aff;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .search-box button:hover {
+      background-color: #0056b3;
+    }
+
+    .station-info {
+      border-bottom: 2px solid #f0f0f0;
+      padding-bottom: 12px;
+      margin-bottom: 16px;
+    }
+
+    .station-info h2 {
+      font-size: 1.2rem;
+      margin-bottom: 4px;
+    }
+
+    .badge {
+      display: inline-block;
+      background: #e9ecef;
+      color: #495057;
+      font-size: 0.75rem;
+      padding: 4px 8px;
+      border-radius: 4px;
+    }
+
+    .bus-list {
+      list-style: none;
+    }
+
+    .bus-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .bus-item:last-child {
+      border-bottom: none;
+    }
+
+    .bus-name {
+      font-weight: bold;
+      font-size: 1.1rem;
+      color: #007aff;
+    }
+
+    .bus-arrival-info {
+      text-align: right;
+      font-size: 0.85rem;
+    }
+
+    .first-arrival {
+      color: #d9534f;
+      font-weight: bold;
+    }
+
+    .second-arrival {
+      color: #6c757d;
+      margin-top: 2px;
+    }
+
+    .status-msg {
+      text-align: center;
+      padding: 20px 0;
+      color: #666;
+    }
+
+    .status-msg.error {
+      color: #d9534f;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🚌 버스 도착 정보 조회</h1>
+      <p>정류소 고유번호(ARS-ID 5자리)를 입력하세요.</p>
+    </header>
+
+    <main>
+      <form id="search-form" class="search-box">
+        <input 
+          type="text" 
+          id="ars-id-input" 
+          placeholder="예: 02001, 23101" 
+          maxlength="5" 
+          pattern="\d{5}" 
+          required 
+        />
+        <button type="submit">조회</button>
+      </form>
+
+      <div id="station-info" class="station-info hidden">
+        <h2 id="station-name">-</h2>
+        <span id="station-id-display" class="badge">ARS-ID: -</span>
+      </div>
+
+      <div id="loading" class="status-msg hidden">도착 정보를 불러오는 중...</div>
+      <div id="error-msg" class="status-msg error hidden"></div>
+
+      <ul id="bus-list" class="bus-list"></ul>
+    </main>
+  </div>
+
+  <script>
+    // 본인의 Google Apps Script 웹앱 배포 URL을 입력하세요.
+    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyEa2DU3xUNZgGhTgYT3AlkcXO4X6EfH1U3xosCnira-ELfHJUNQjNkXIlQw3FO82rs7w/exec";
+
+    const form = document.getElementById("search-form");
+    const arsInput = document.getElementById("ars-id-input");
+    const stationInfo = document.getElementById("station-info");
+    const stationNameEl = document.getElementById("station-name");
+    const stationIdDisplay = document.getElementById("station-id-display");
+    const busList = document.getElementById("bus-list");
+    const loadingEl = document.getElementById("loading");
+    const errorEl = document.getElementById("error-msg");
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const arsId = arsInput.value.trim();
+      if (arsId.length === 5) {
+        fetchBusArrivalInfo(arsId);
+      } else {
+        showError("정류소 번호 5자리를 입력해주세요.");
+      }
+    });
+
+    async function fetchBusArrivalInfo(arsId) {
+      resetUI();
+      loadingEl.classList.remove("hidden");
+
+      const targetUrl = `${GAS_WEB_APP_URL}?arsId=${arsId}`;
+
+      try {
+        const response = await fetch(targetUrl);
+        if (!response.ok) {
+          throw new Error("서버 통신 실패");
+        }
+
+        const data = await response.json();
+        
+        if (data.error) {
+          showError(data.error);
+          return;
+        }
+
+        const itemList = data.msgBody?.itemList;
+
+        if (!itemList || itemList.length === 0) {
+          showError("도착 예정인 버스가 없거나 정류소 번호가 올바르지 않습니다.");
+          return;
+        }
+
+        renderBusList(itemList, arsId);
+      } catch (error) {
+        console.error(error);
+        showError("정보를 불러오는 중 오류가 발생했습니다.");
+      } finally {
+        loadingEl.classList.add("hidden");
+      }
+    }
+
+    function renderBusList(items, arsId) {
+      stationNameEl.textContent = items[0].stNm || "정류소 정보";
+      stationIdDisplay.textContent = `ARS-ID: ${arsId}`;
+      stationInfo.classList.remove("hidden");
+
+      busList.innerHTML = "";
+
+      items.forEach((item) => {
+        const li = document.createElement("li");
+        li.className = "bus-item";
+
+        const busName = item.busRouteAbrv || item.rtNm;
+        const arrmsg1 = item.arrmsg1;
+        const arrmsg2 = item.arrmsg2;
+
+        li.innerHTML = `
+          <div class="bus-name">${busName}</div>
+          <div class="bus-arrival-info">
+            <div class="first-arrival">${arrmsg1}</div>
+            <div class="second-arrival">${arrmsg2}</div>
+          </div>
+        `;
+
+        busList.appendChild(li);
+      });
+    }
+
+    function resetUI() {
+      stationInfo.classList.add("hidden");
+      errorEl.classList.add("hidden");
+      busList.innerHTML = "";
+    }
+
+    function showError(msg) {
+      errorEl.textContent = msg;
+      errorEl.classList.remove("hidden");
+    }
+  </script>
+</body>
+</html>
